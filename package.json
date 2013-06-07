@@ -1,0 +1,30 @@
+{
+  "name": "snap_crawl",
+  "version": "0.0.0",
+  "description": "a crawler to mine snapchat's social network",
+  "main": "index.js",
+  "dependencies":[
+    "jsdom",
+    "request",
+    "redis",
+    "step",
+    "json"
+  ],
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/whichlight/snap_crawl.git"
+  },
+  "keywords": [
+    "snapchat",
+    "crawler",
+    "mine",
+    "scraper",
+    "network"
+  ],
+  "author": "KaBob",
+  "license": "BSD"
+}
