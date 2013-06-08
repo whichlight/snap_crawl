@@ -2,8 +2,8 @@ var request = require('request'),
     jsdom = require('jsdom'),
     step = require('step'),
     redis = require('redis'),
-    db = redis.createClient();
-
+    db = redis.createClient(),
+    _ = require("underscore");
 
 db.on("error", function (err) {
   console.log("Error " + err);
@@ -11,35 +11,125 @@ db.on("error", function (err) {
 
 var jquery_path = "./libs/jquery-1.10.1.min.js";
 
-//keep track of number of concurrent requests
-var conReqs = 0;
+function NodeQueue(opts){
+  if (!(this instanceof NodeQueue)){
+    return new NodeQueue(opts)
+  }
 
-function getSnapNodes(user, fn) {
-  db.get(user, function(err, result){
+  this.config = _.extend({
+  },opts);
+
+  this.store = [];
+
+}
+
+NodeQueue.prototype.enqueue = function(name) {
+
+  console.log(this.store.length);
+  //todo make sure we havent already done this
+  this.store.push(name);
+
+}
+
+NodeQueue.prototype.dequeue = function() {
+
+  if (this.store.length === 0) {
+    return;
+  }
+
+  return this.store.shift();
+
+}
+
+function NodeTraverser(opts){
+  if (!(this instanceof NodeTraverser)){
+    return new NodeTraverser(opts)
+  }
+
+  this.config = _.extend({
+
+  },opts);
+
+}
+
+NodeTraverser.prototype.next = function(){
+  var user = this.config.queue.dequeue(),
+      self = this;
+
+
+ console.log(user);
+  db.get(user, function(err, result) {
     if (result) {
-      console.log("skipping " + user);
-      fn();
+      dbParser(result, function(err,friends){
+        self.friendsHandler(err,friends)
+
+
+      });
     }
-    else {
-      conReqs++;
-      console.error(conReqs, user);
+    else{
+      //htmlparser
       var req = "http://www.snapchat.com/";
       request(req + user, function (err, response, body) {
-        conReqs--;
-        if (conReqs==0) {
-          start();
-
-        }
         if (err || response.statusCode != 200) {
           return setTimeout(function(){getSnapNodes(user,fn)});
         }
         else {
-          fn(null, user, body)
+          htmlParser(user, body,function(err, friends){
+            self.friendsHandler(err,friends)
+          })
         }
       });
     }
   });
 }
+
+
+
+NodeTraverser.prototype.friendsHandler = function(err, friends){
+  var self = this;
+  friends.forEach(function(f) {
+    self.config.queue.enqueue(f);
+  })
+
+  this.next();
+}
+
+function htmlParser(user, body, fn){
+
+  jsdom.env({
+    html: body,
+  scripts: [jquery_path]
+  }, function (err, window) {
+
+    var $ = window.jQuery;
+    var friends = $(".best_name a");
+    var results = {};
+    var scraped_user = $("#name_text").text();
+
+    if (scraped_user === "") {
+      return fn(null,[user]);
+    }
+    else {
+      results.user = user;
+      var score = Number($("#score").text().split(":")[1]);
+      besties = [];
+      friends.each(function(key, val){besties.push(val.innerHTML)});
+      results.friends = besties;
+      results.score = score;
+      results.time = Math.floor(Number(new Date()) / 1000.0);
+      saveResults(results, function() {
+        fn(null, besties);
+      });
+    }
+  })
+}
+
+function dbParser(record, fn){
+  var data = JSON.parse(record);
+  fn(null,data.friends);
+}
+
+
 
 function saveResults(results, fn){
   db.set(results["user"], JSON.stringify(results), function(){
@@ -47,82 +137,20 @@ function saveResults(results, fn){
   });
 }
 
-function createRequest(req_user, i) {
-  return function(err, res_user, body) {
-    if (err || res_user) {
-      pullNodes(err, res_user, body);
-    }
-    getSnapNodes(req_user, this);
-  }
-}
 
-
-// user can be the actual data if it was in the DB
-function pullNodes(err, user, body){
-  jsdom.env({
-    html: body,
-    scripts: [jquery_path]
-  }, function (err, window) {
-    var $ = window.jQuery;
-    var friends = $(".best_name a");
-    var results = {};
-    var scraped_user = $("#name_text").text();
-
-    if (scraped_user === "") {
-      getSnapNodes(user, pullNodes);
-    }
-    else {
-      results['user']= user;
-      var score = $("#score").text().split(":")[1].replace(/\s+/g, ' ');
-      besties = [];
-      for(var i=0;i<friends.length;i++){besties.push(friends[i].innerHTML)};
-      results['friends']=besties;
-      results['score']=score;
-      results['time'] = Math.floor(Number(new Date())/1000.0);
-      saveResults(results, function(){
-        var reqs = [];
-        var i=0;
-        besties.forEach(function(f){
-          reqs.push(createRequest(f, i++))
-        })
-        step.apply(null, reqs);
-      });
-
-    }
-  });
-}
-
-function findSeed(err, candidate) {
-  if (!candidate) {
-    throw new Error('couldn\'t find a seed :(');
-  }
-  db.get(candidate, function(err, result) {
-    if (result) {
-      var data = JSON.parse(result),
-          friends = data['friends'];
-      findSeed(null, friends[Math.floor(Math.random() * friends.length)]);
-    } else {
-      getSnapNodes(candidate, pullNodes);
-    }
-  });
-}
-
-function start(){
 step(
-  function() {
-    db.on("connect", this);
-  },
-  function(err) {
-    db.select(10, this);
-  },
-  function(err) {
-    db.llen("index", this);
-  },
-  function(err, len){
-    db.lindex("index", len - 1, this);
-  },
-  findSeed
-);
-}
+    function() {
+      db.on("connect", this);
+    },
+    function(err) {
+      db.select(10, this);
+    },
+    function(err){
+      var queue = NodeQueue();
+      var worker = NodeTraverser({queue:queue});
+      queue.enqueue("whichlight");
+      worker.next();
+    }
+    );
 
-start();
+

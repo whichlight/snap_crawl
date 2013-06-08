@@ -8,7 +8,8 @@
     "request",
     "redis",
     "step",
-    "json"
+    "json",
+    "underscore"
   ],
   "devDependencies": {},
   "scripts": {

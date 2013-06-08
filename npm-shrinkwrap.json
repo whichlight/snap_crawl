@@ -138,6 +138,9 @@
     },
     "json": {
       "version": "0.0.13"
+    },
+    "underscore": {
+      "version": "1.4.4"
     }
   }
 }
